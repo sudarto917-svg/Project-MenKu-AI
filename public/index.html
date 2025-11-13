@@ -19,11 +19,11 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        // START: PENAMBAHAN UNTUK FIREBASE FUNCTIONS
-        import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-functions.js"; 
-        // END: PENAMBAHAN UNTUK FIREBASE FUNCTIONS
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, collection, addDoc, setDoc, getDoc, deleteDoc, updateDoc, onSnapshot, query, where, orderBy, serverTimestamp, enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        // BARU: Import untuk Firebase Functions
+        import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-functions.js";
+
 
         const firebaseConfig = {
             apiKey: "AIzaSyDqZrNbvAw1UgWBoAyMohyU2mjRJkH-1iI",
@@ -38,8 +38,9 @@
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
-        // Inisialisasi Functions (Ganti 'asia-southeast2' jika region Anda berbeda)
-        const functions = getFunctions(app, 'asia-southeast2'); 
+        // BARU: Inisialisasi Firebase Functions
+        const functions = getFunctions(app, 'asia-southeast2'); // PASTIKAN REGION SAMA!
+
 
         // --- STATE ---
         let currentUser = null;
@@ -217,10 +218,6 @@
             if(filteredTransactions.length === 0) {
                 listContainer.innerHTML = `<div class="text-center py-12 text-slate-400 text-sm flex flex-col items-center"><i class="fa-regular fa-folder-open text-2xl mb-2"></i><p>Belum ada transaksi.</p></div>`;
             }
-            
-            // START: PANGGIL FUNGSI AI
-            if(appLoaded) getAiAdvice(); 
-            // END: PANGGIL FUNGSI AI
         }
 
         function createTransactionElement(t) {
@@ -260,62 +257,6 @@
             return div;
         }
 
-        // === FUNGSI BARU UNTUK AI ANALYST ===
-        window.getAiAdvice = async () => {
-            if (!currentFamilyId) return; 
-
-            const loadingEl = document.getElementById('ai-advice-loading');
-            const contentEl = document.getElementById('ai-advice-content');
-            
-            loadingEl.style.display = 'block';
-            loadingEl.textContent = 'Mengambil analisis cerdas...';
-            contentEl.innerHTML = '';
-
-            try {
-                // 1. Kumpulkan Data yang dibutuhkan AI (Parsing angka dari DOM)
-                // Hapus Rp, spasi, titik (untuk ribuan), dan koma (untuk desimal) sebelum parse
-                const walletSuami = parseFloat(document.getElementById('wallet-suami').innerText.replace(/[Rp.\s]/g, "").replace(",", ".")); 
-                const walletIstri = parseFloat(document.getElementById('wallet-istri').innerText.replace(/[Rp.\s]/g, "").replace(",", "."));
-                
-                const totalIncome = walletSuami + walletIstri;
-                                   
-                // Data budget diambil dari state categoryBudgets
-                const currentBudget = categoryBudgets;
-                
-                // 2. Persiapan Pemanggilan Firebase Function
-                const smartAdviceFunction = httpsCallable(functions, 'getSmartBudgetAdvice');
-                
-                // 3. Panggil Function (Function ini harus sudah di-deploy di Firebase Functions)
-                const response = await smartAdviceFunction({ 
-                    totalIncome, 
-                    currentBudget 
-                });
-
-                const { success, advice } = response.data;
-
-                if (success) {
-                    // Mengubah teks saran (yang diharapkan berbentuk list item *) menjadi list HTML
-                    const formattedAdvice = advice
-                        .split('\n')
-                        .filter(line => line.trim().startsWith('*'))
-                        .map(line => `<li>${line.replace(/\* /g, '').trim()}</li>`)
-                        .join('');
-                        
-                    contentEl.innerHTML = `<ul class="list-disc pl-4">${formattedAdvice}</ul>`;
-                    loadingEl.style.display = 'none';
-                } else {
-                    loadingEl.textContent = `Error: ${response.data.error || 'Gagal mendapatkan saran.'}`;
-                    contentEl.innerHTML = '';
-                }
-
-            } catch (error) {
-                console.error("Error in frontend:", error);
-                loadingEl.textContent = "Koneksi ke server AI gagal. (Pastikan Firebase Function sudah di-deploy)";
-                contentEl.innerHTML = '';
-            }
-        };
-
-
         // --- UTILS & FORM HANDLERS ---
 
         window.generateReport = () => {
@@ -349,6 +290,49 @@
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Mengunduh...';
             html2pdf().set(opt).from(element).save().then(() => { btn.innerHTML = '<i class="fa-solid fa-file-pdf"></i> Download PDF'; });
         };
+        
+        // --- BARU: FITUR AI: FUNCTIONS CALLER ---
+        window.getAiAdvice = async () => {
+            const btn = document.getElementById('btn-ai-advice');
+            const resultDiv = document.getElementById('ai-advice-result');
+            
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Koki AI sedang berpikir...';
+            resultDiv.innerHTML = ''; // Kosongkan hasil sebelumnya
+
+            try {
+                // Kumpulkan data yang dibutuhkan AI
+                const incomeText = document.getElementById('monthly-income').innerText;
+                const monthlyIncome = parseFloat(incomeText.replace('Rp', '').replace(/\./g, '').replace(/,/g, '.').trim()) || 0;
+                
+                // Ambil data budget dari STATE yang sudah ada
+                const currentBudget = categoryBudgets; 
+
+                // Panggil Firebase Function (Koki AI)
+                const callGetAdvice = httpsCallable(functions, 'getSmartBudgetAdvice');
+                
+                const result = await callGetAdvice({ 
+                    totalIncome: monthlyIncome, 
+                    currentBudget: currentBudget 
+                });
+
+                if (result.data.success) {
+                    // Tampilkan hasil saran dari AI
+                    const formattedAdvice = result.data.advice.split('*').filter(a => a.trim()).map(a => `<li class="text-slate-700">${a.trim()}</li>`).join('');
+                    resultDiv.innerHTML = `<ul class="list-disc pl-5 space-y-2 text-sm">${formattedAdvice}</ul>`;
+                } else {
+                    resultDiv.innerHTML = `<div class="text-rose-500 text-sm py-2">Error AI: ${result.data.error || 'Terjadi kesalahan saat memproses.'}</div>`;
+                }
+
+            } catch (error) {
+                console.error("Error calling AI function:", error);
+                resultDiv.innerHTML = `<div class="text-rose-500 text-sm py-2">Gagal memanggil fungsi. Pastikan sudah login dan koneksi stabil.</div>`;
+            }
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-lightbulb mr-2"></i> Dapatkan Saran Cerdas';
+        };
+        // --- AKHIR FITUR AI ---
+
 
         window.openAddModal = () => {
             isEditing = false; editingId = null;
@@ -622,20 +606,17 @@
                 </div>
                 <div class="lg:col-span-1 space-y-6">
                     <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+                        <h3 class="font-bold text-slate-700 text-xs uppercase mb-4">Saran Keuangan Cerdas</h3>
+                        <button id="btn-ai-advice" onclick="getAiAdvice()" class="w-full bg-emerald-500 hover:bg-emerald-600 text-white py-3 rounded-xl font-bold text-sm shadow-lg active:bg-emerald-700 active:scale-95 transition mb-4">
+                            <i class="fa-solid fa-lightbulb mr-2"></i> Dapatkan Saran Cerdas
+                        </button>
+                        <div id="ai-advice-result">
+                            <p class="text-xs text-slate-400">Tekan tombol di atas setelah mengatur budget.</p>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
                         <h3 class="font-bold text-slate-700 mb-4 text-xs uppercase">Pengeluaran</h3>
                         <div class="w-40 h-40 mx-auto"><canvas id="catChart"></canvas></div>
-                    </div>
-                    
-                    <div id="ai-advice-section" class="bg-indigo-50 rounded-2xl p-6 shadow-sm border border-indigo-100">
-                        <h3 class="font-bold text-indigo-700 mb-4 flex items-center gap-2 text-xs uppercase">
-                            <i class="fa-solid fa-robot text-lg"></i> Saran Keuangan Cerdas
-                        </h3>
-                        <p id="ai-advice-loading" class="text-sm text-indigo-500 italic">Mengambil analisis anggaran...</p>
-                        <div id="ai-advice-content" class="text-slate-700 text-sm space-y-2">
-                            </div>
-                        <button onclick="getAiAdvice()" class="mt-4 text-xs font-bold text-indigo-600 hover:text-indigo-800 transition">
-                            <i class="fa-solid fa-sync-alt mr-1"></i> Analisis Ulang
-                        </button>
                     </div>
                     <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
                         <div class="flex justify-between items-center mb-4"><h3 class="font-bold text-slate-700 text-xs uppercase">Budgeting</h3><button onclick="toggleModal('budget-modal', true)" class="text-xs text-indigo-600 font-bold">Edit</button></div>
