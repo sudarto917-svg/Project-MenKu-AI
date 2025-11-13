@@ -1,10 +1,15 @@
-// functions/index.js (Gunakan kode ini sebagai dasar)
+// functions/index.js
 const functions = require('firebase-functions');
-// Jika Anda ingin menggunakan AI sungguhan, un-comment dan ganti dengan SDK yang relevan
-// const { GoogleGenAI } = require('@google/genai'); 
+const { GoogleGenAI } = require('@google/genai'); 
+
+// Ambil Secret Key dari Firebase Secret Manager
+// PASTIKAN ANDA SUDAH MENJALANKAN PERINTAH: firebase functions:secrets:set GEMINI_API_KEY="..."
+const ai = new GoogleGenAI({ 
+    apiKey: process.env.GEMINI_API_KEY 
+});
 
 exports.getSmartBudgetAdvice = functions
-    .region('asia-southeast2') // HARUS SAMA dengan yang di frontend HTML!
+    .region('asia-southeast2') // Pastikan region ini sama dengan di frontend
     .https.onCall(async (data, context) => {
 
     if (!context.auth) {
@@ -13,26 +18,36 @@ exports.getSmartBudgetAdvice = functions
 
     const { totalIncome, currentBudget } = data;
     
-    // ... Logika Formatting Prompt di sini ...
+    // Logika Formatting Prompt
     const budgetLines = Object.keys(currentBudget).map(category => {
         return `${category}: Rp ${currentBudget[category].toLocaleString('id-ID')}`;
     }).join('\n');
 
+    // Prompt Detail
     const prompt = `
-        ... [Isi prompt Anda di sini] ...
+        Anda adalah analis keuangan keluarga. Saya memiliki total pendapatan bulanan Rp ${totalIncome.toLocaleString('id-ID')}.
+        Berikut adalah target anggaran bulanan bulanan saya:
+        ${budgetLines}
+        
+        Tujuan utama kami adalah melunasi utang (Tagihan) yang besar dan membangun tabungan/investasi.
+        Berikan 3 saran manajemen keuangan yang spesifik dan praktis. Fokus pada penghematan dan penguatan kategori Tabungan/Investasi.
+        Jawab dalam Bahasa Indonesia dan format sebagai list item, dimulai dengan tanda bintang (*).
     `;
 
     try {
-        // Hapus simulasi ini dan ganti dengan kode pemanggilan AI asli Anda.
-        const advice = `
-            * Prioritaskan Tabungan 10%.
-            * Kurangi Anggaran Makanan 5%.
-            * Hindari Pengeluaran Hiburan sementara utang besar.
-        `;
+        // Panggilan API AI yang sebenarnya
+        const response = await ai.models.generateContent({ 
+            model: "gemini-2.5-flash", 
+            contents: [{role: "user", parts: [{text: prompt}]}] 
+        });
+        
+        const advice = response.text.trim();
         
         return { success: true, advice: advice };
 
     } catch (error) {
-        return { success: false, error: 'Error eksternal AI.' };
+        console.error("Error calling AI API:", error);
+        // Penting: Kembalikan error yang aman
+        return { success: false, error: 'Gagal mendapatkan saran dari AI. Cek log Firebase Functions.' };
     }
 });
